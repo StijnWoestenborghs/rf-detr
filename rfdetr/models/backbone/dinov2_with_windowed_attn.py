@@ -33,6 +33,8 @@ from transformers.configuration_utils import PretrainedConfig
 from transformers.utils.backbone_utils import BackboneConfigMixin, get_aligned_output_features_output_indices
 
 
+torch.fx.wrap(torch_int)
+
 logger = logging.get_logger(__name__)
 
 # Base docstring
@@ -204,11 +206,12 @@ class Dinov2WithRegistersPatchEmbeddings(nn.Module):
 
     def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
         num_channels = pixel_values.shape[1]
-        if num_channels != self.num_channels:
-            raise ValueError(
-                "Make sure that the channel dimension of the pixel values match with the one set in the configuration."
-                f" Expected {self.num_channels} but got {num_channels}."
-            )
+        if not torch.fx._symbolic_trace.is_fx_tracing():
+            if num_channels != self.num_channels:
+                raise ValueError(
+                    "Make sure that the channel dimension of the pixel values match with the one set in the configuration."
+                    f" Expected {self.num_channels} but got {num_channels}."
+                )
         embeddings = self.projection(pixel_values).flatten(2).transpose(1, 2)
         return embeddings
 
@@ -245,8 +248,9 @@ class WindowedDinov2WithRegistersEmbeddings(nn.Module):
         num_positions = self.position_embeddings.shape[1] - 1
 
         # Skip interpolation for matching dimensions (unless tracing)
-        if not torch.jit.is_tracing() and num_patches == num_positions and height == width:
-            return self.position_embeddings
+        if not torch.fx._symbolic_trace.is_fx_tracing():
+            if not torch.jit.is_tracing() and num_patches == num_positions and height == width:
+                return self.position_embeddings
 
         # Handle class token and patch embeddings separately
         class_pos_embed = self.position_embeddings[:, 0]
@@ -275,9 +279,10 @@ class WindowedDinov2WithRegistersEmbeddings(nn.Module):
         ).to(dtype=target_dtype)
 
         # Validate output dimensions if not tracing
-        if not torch.jit.is_tracing():
-            if int(height) != patch_pos_embed.shape[-2] or int(width) != patch_pos_embed.shape[-1]:
-                raise ValueError("Width or height does not match with the interpolated position embeddings")
+        if not torch.fx._symbolic_trace.is_fx_tracing():
+            if not torch.jit.is_tracing():
+                if int(height) != patch_pos_embed.shape[-2] or int(width) != patch_pos_embed.shape[-1]:
+                    raise ValueError("Width or height does not match with the interpolated position embeddings")
 
         # Reshape back to original format
         patch_pos_embed = patch_pos_embed.permute(0, 2, 3, 1).view(1, -1, dim)

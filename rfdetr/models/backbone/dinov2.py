@@ -184,7 +184,8 @@ class DinoV2(nn.Module):
 
     def forward(self, x):
         block_size = self.patch_size * self.num_windows
-        assert x.shape[2] % block_size == 0 and x.shape[3] % block_size == 0, f"Backbone requires input shape to be divisible by {block_size}, but got {x.shape}"
+        if not torch.fx._symbolic_trace.is_fx_tracing():
+            assert x.shape[2] % block_size == 0 and x.shape[3] % block_size == 0, f"Backbone requires input shape to be divisible by {block_size}, but got {x.shape}"
         x = self.encoder(x)
         return list(x[0])
 

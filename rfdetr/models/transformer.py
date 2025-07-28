@@ -25,6 +25,31 @@ from torch import nn, Tensor
 
 from rfdetr.models.ops.modules import MSDeformAttn
 
+torch.fx.wrap(min)
+
+
+# # Wrap functions that need to be FX-compatible
+# def create_coordinate_grid(H, W, device):
+#     """Create coordinate grid that works with FX tracing"""
+#     grid_y, grid_x = torch.meshgrid(torch.linspace(0, H - 1, H, dtype=torch.float32, device=device),
+#                                     torch.linspace(0, W - 1, W, dtype=torch.float32, device=device))
+#     return grid_y, grid_x
+
+# torch.fx.wrap(create_coordinate_grid)
+
+
+def calculate_spatial_shapes(srcs):
+    spatial_shapes = []
+    for src in srcs:
+        _, _, h, w = src.shape
+        spatial_shape = (h, w)
+        spatial_shapes.append(spatial_shape)
+    spatial_shapes = torch.as_tensor(spatial_shapes, dtype=torch.long)
+    return spatial_shapes
+
+torch.fx.wrap(calculate_spatial_shapes)
+
+
 class MLP(nn.Module):
     """ Very simple multi-layer perceptron (also called FFN)"""
 
@@ -44,7 +69,7 @@ def gen_sineembed_for_position(pos_tensor, dim=128):
     # n_query, bs, _ = pos_tensor.size()
     # sineembed_tensor = torch.zeros(n_query, bs, 256)
     scale = 2 * math.pi
-    dim_t = torch.arange(dim, dtype=pos_tensor.dtype, device=pos_tensor.device)
+    dim_t = torch.arange(dim, dtype=pos_tensor.dtype).to(pos_tensor.device)
     dim_t = 10000 ** (2 * (dim_t // 2) / dim)
     x_embed = pos_tensor[:, :, 0] * scale
     y_embed = pos_tensor[:, :, 1] * scale
@@ -68,8 +93,9 @@ def gen_sineembed_for_position(pos_tensor, dim=128):
         raise ValueError("Unknown pos_tensor shape(-1):{}".format(pos_tensor.size(-1)))
     return pos
 
+torch.fx.wrap(gen_sineembed_for_position)
 
-def gen_encoder_output_proposals(memory, memory_padding_mask, spatial_shapes, unsigmoid=True):
+def gen_encoder_output_proposals(memory, memory_padding_mask, spatial_shapes, num_levels, unsigmoid=True):
     """
     Input:
         - memory: bs, \sum{hw}, d_model
@@ -83,6 +109,13 @@ def gen_encoder_output_proposals(memory, memory_padding_mask, spatial_shapes, un
     base_scale = 4.0
     proposals = []
     _cur = 0
+
+    # for lvl in range(num_levels):
+    #     # hws = spatial_shapes.unbind(1)  # list of tensors
+    #     # H_, W_ = hws[0][lvl], hws[1][lvl]
+    #     H_ = spatial_shapes[lvl, 0]
+    #     W_ = spatial_shapes[lvl, 1]
+
     for lvl, (H_, W_) in enumerate(spatial_shapes):
         if memory_padding_mask is not None:
             mask_flatten_ = memory_padding_mask[:, _cur:(_cur + H_ * W_)].view(N_, H_, W_, 1)
@@ -94,6 +127,7 @@ def gen_encoder_output_proposals(memory, memory_padding_mask, spatial_shapes, un
 
         grid_y, grid_x = torch.meshgrid(torch.linspace(0, H_ - 1, H_, dtype=torch.float32, device=memory.device),
                                         torch.linspace(0, W_ - 1, W_, dtype=torch.float32, device=memory.device))
+        # grid_y, grid_x = create_coordinate_grid(H_, W_, memory.device)
         grid = torch.cat([grid_x.unsqueeze(-1), grid_y.unsqueeze(-1)], -1) # H_, W_, 2
 
         scale = torch.cat([valid_W.unsqueeze(-1), valid_H.unsqueeze(-1)], 1).view(N_, 1, 1, 2)
@@ -124,6 +158,9 @@ def gen_encoder_output_proposals(memory, memory_padding_mask, spatial_shapes, un
     output_memory = output_memory.masked_fill(~output_proposals_valid, float(0))
 
     return output_memory.to(memory.dtype), output_proposals.to(memory.dtype)
+
+
+torch.fx.wrap(gen_encoder_output_proposals)
 
 
 class Transformer(nn.Module):
@@ -200,12 +237,15 @@ class Transformer(nn.Module):
         src_flatten = []
         mask_flatten = [] if masks is not None else None
         lvl_pos_embed_flatten = []
-        spatial_shapes = []
+        # spatial_shapes = []
         valid_ratios = [] if masks is not None else None
         for lvl, (src, pos_embed) in enumerate(zip(srcs, pos_embeds)):
             bs, c, h, w = src.shape
-            spatial_shape = (h, w)
-            spatial_shapes.append(spatial_shape)
+            # spatial_shape = (h, w)
+            # shape_tensor = torch.zeros(2, dtype=torch.long)
+            # shape_tensor[0] = h
+            # shape_tensor[1] = w
+            # spatial_shapes.append(shape_tensor)
 
             src = src.flatten(2).transpose(1, 2)                # bs, hw, c
             pos_embed = pos_embed.flatten(2).transpose(1, 2)    # bs, hw, c
@@ -219,12 +259,14 @@ class Transformer(nn.Module):
             mask_flatten = torch.cat(mask_flatten, 1)   # bs, \sum{hxw}
             valid_ratios = torch.stack([self.get_valid_ratio(m) for m in masks], 1)
         lvl_pos_embed_flatten = torch.cat(lvl_pos_embed_flatten, 1) # bs, \sum{hxw}, c 
-        spatial_shapes = torch.as_tensor(spatial_shapes, dtype=torch.long, device=memory.device)
+        # spatial_shapes = torch.as_tensor(spatial_shapes, dtype=torch.long, device=memory.device)
+        # spatial_shapes = torch.stack(spatial_shapes, dim=0).to(memory.device)
+        spatial_shapes = calculate_spatial_shapes(srcs).to(memory.device)
         level_start_index = torch.cat((spatial_shapes.new_zeros((1, )), spatial_shapes.prod(1).cumsum(0)[:-1]))
         
         if self.two_stage:
             output_memory, output_proposals = gen_encoder_output_proposals(
-                memory, mask_flatten, spatial_shapes, unsigmoid=not self.bbox_reparam)
+                memory, mask_flatten, spatial_shapes, self.num_feature_levels, unsigmoid=not self.bbox_reparam)
             # group detr for first stage
             refpoint_embed_ts, memory_ts, boxes_ts = [], [], []
             group_detr = self.group_detr if self.training else 1
@@ -244,8 +286,9 @@ class Transformer(nn.Module):
                         output_memory_gidx) + output_proposals # (bs, \sum{hw}, 4) unsigmoid
 
                 topk = min(self.num_queries, enc_outputs_class_unselected_gidx.shape[-2])
-                topk_proposals_gidx = torch.topk(enc_outputs_class_unselected_gidx.max(-1)[0], topk, dim=1)[1] # bs, nq
-                
+                # topk_proposals_gidx = torch.topk(enc_outputs_class_unselected_gidx.max(-1)[0], topk, dim=1)[1] # bs, nq
+                topk_proposals_gidx = torch.argsort(enc_outputs_class_unselected_gidx.max(-1)[0], dim=1, descending=True)[:, :topk]
+
                 refpoint_embed_gidx_undetach = torch.gather(
                     enc_outputs_coord_unselected_gidx, 1, topk_proposals_gidx.unsqueeze(-1).repeat(1, 1, 4)) # unsigmoid
                 # for decoder layer, detached as initial ones, (bs, nq, 4)

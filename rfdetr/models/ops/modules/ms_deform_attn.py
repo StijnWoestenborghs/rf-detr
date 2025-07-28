@@ -37,6 +37,23 @@ def _is_power_of_2(n):
     return (n & (n - 1) == 0) and n != 0
 
 
+def calc_sampling_locations(reference_points, sampling_offsets, input_spatial_shapes, n_points):
+    if reference_points.shape[-1] == 2:
+        offset_normalizer = torch.stack([input_spatial_shapes[..., 1], input_spatial_shapes[..., 0]], -1)
+        sampling_locations = reference_points[:, :, None, :, None, :] \
+                                + sampling_offsets / offset_normalizer[None, None, None, :, None, :]
+    elif reference_points.shape[-1] == 4:
+        sampling_locations = reference_points[:, :, None, :, None, :2] \
+                                + sampling_offsets / n_points * reference_points[:, :, None, :, None, 2:] * 0.5
+    else:
+        raise ValueError(
+            'Last dim of reference_points must be 2 or 4, but get {} instead.'.format(reference_points.shape[-1]))
+    return sampling_locations
+
+
+torch.fx.wrap(calc_sampling_locations)
+
+
 class MSDeformAttn(nn.Module):
     """Multi-Scale Deformable Attention Module
     """
@@ -111,7 +128,8 @@ class MSDeformAttn(nn.Module):
         """
         N, Len_q, _ = query.shape
         N, Len_in, _ = input_flatten.shape
-        assert (input_spatial_shapes[:, 0] * input_spatial_shapes[:, 1]).sum() == Len_in
+        if not torch.fx._symbolic_trace.is_fx_tracing():
+            assert (input_spatial_shapes[:, 0] * input_spatial_shapes[:, 1]).sum() == Len_in
 
         value = self.value_proj(input_flatten)
         if input_padding_mask is not None:
@@ -121,20 +139,11 @@ class MSDeformAttn(nn.Module):
         attention_weights = self.attention_weights(query).view(N, Len_q, self.n_heads, self.n_levels * self.n_points)
 
         # N, Len_q, n_heads, n_levels, n_points, 2
-        if reference_points.shape[-1] == 2:
-            offset_normalizer = torch.stack([input_spatial_shapes[..., 1], input_spatial_shapes[..., 0]], -1)
-            sampling_locations = reference_points[:, :, None, :, None, :] \
-                                 + sampling_offsets / offset_normalizer[None, None, None, :, None, :]
-        elif reference_points.shape[-1] == 4:
-            sampling_locations = reference_points[:, :, None, :, None, :2] \
-                                 + sampling_offsets / self.n_points * reference_points[:, :, None, :, None, 2:] * 0.5
-        else:
-            raise ValueError(
-                'Last dim of reference_points must be 2 or 4, but get {} instead.'.format(reference_points.shape[-1]))
+        sampling_locations = calc_sampling_locations(reference_points, sampling_offsets, input_spatial_shapes, self.n_points)
         attention_weights = F.softmax(attention_weights, -1)
 
         value = value.transpose(1, 2).contiguous().view(N, self.n_heads, self.d_model // self.n_heads, Len_in)
         output = ms_deform_attn_core_pytorch(
-            value, input_spatial_shapes, sampling_locations, attention_weights)
+            value, input_spatial_shapes, sampling_locations, attention_weights, self.n_levels)
         output = self.output_proj(output)
         return output

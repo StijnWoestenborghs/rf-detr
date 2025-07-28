@@ -27,7 +27,8 @@ import torch.nn.functional as F
 from torch import nn
 
 from rfdetr.util import box_ops
-from rfdetr.util.misc import (NestedTensor, nested_tensor_from_tensor_list,
+from rfdetr.util.misc import (NestedTensor, nested_tensor_from_tensor_list, 
+                       nested_tensor_from_proxy,
                        accuracy, get_world_size,
                        is_dist_avail_and_initialized)
 
@@ -143,6 +144,8 @@ class LWDETR(nn.Module):
         """
         if isinstance(samples, (list, torch.Tensor)):
             samples = nested_tensor_from_tensor_list(samples)
+        elif isinstance(samples, torch.fx.proxy.Proxy):
+            samples = nested_tensor_from_proxy(samples)
         features, poss = self.backbone(samples)
 
         srcs = []
@@ -178,8 +181,9 @@ class LWDETR(nn.Module):
             outputs_class = self.class_embed(hs)
 
             out = {'pred_logits': outputs_class[-1], 'pred_boxes': outputs_coord[-1]}
-            if self.aux_loss:
-                out['aux_outputs'] = self._set_aux_loss(outputs_class, outputs_coord)
+            if not torch.fx._symbolic_trace.is_fx_tracing():
+                if self.aux_loss:
+                    out['aux_outputs'] = self._set_aux_loss(outputs_class, outputs_coord)
 
         if self.two_stage:
             group_detr = self.group_detr if self.training else 1

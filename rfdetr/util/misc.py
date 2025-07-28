@@ -349,6 +349,24 @@ def nested_tensor_from_tensor_list(tensor_list: List[Tensor]):
     return NestedTensor(tensor, mask)
 
 
+def nested_tensor_from_proxy(batch: Tensor) -> NestedTensor:
+    
+    # b, c, h, w = batch.shape
+    
+    # HARDCODE FOR NOW
+    B, C, H, W = 5, 3, 224, 224
+
+    # since all images are the same size, mask is all zeros
+    mask = torch.zeros((B, H, W), dtype=torch.bool).to(batch.device)
+
+    # mask = torch.ones((B, H, W), dtype=torch.bool).to(batch.device)
+    # for img, m in zip(batch, mask):
+    #     m[: img.shape[1], :img.shape[2]] = False
+    # print("after error")
+
+    return NestedTensor(batch, mask)
+
+
 # _onnx_nested_tensor_from_tensor_list() is an implementation of
 # nested_tensor_from_tensor_list() that is supported by ONNX tracing.
 @torch.jit.unused
