@@ -540,17 +540,20 @@ class TransformerDecoderLayer(nn.Module):
         # ========== Begin of Self-Attention =============
         # Apply projections here
         # shape: batch_size x num_queries x 256
-        q = k = tgt + query_pos
+        q = tgt + query_pos
+        k = tgt + query_pos
         v = tgt
         if self.training:
             q = torch.cat(q.split(num_queries // self.group_detr, dim=1), dim=0)
             k = torch.cat(k.split(num_queries // self.group_detr, dim=1), dim=0)
             v = torch.cat(v.split(num_queries // self.group_detr, dim=1), dim=0)
 
-        tgt2 = self.self_attn(q, k, v, attn_mask=tgt_mask,
-                            key_padding_mask=tgt_key_padding_mask,
-                            need_weights=False)[0]
-        
+        tgt2 = self.self_attn(
+            q, k, v, attn_mask=tgt_mask,
+            key_padding_mask=tgt_key_padding_mask,
+            need_weights=True if torch.fx._symbolic_trace.is_fx_tracing() else False,
+        )[0]
+
         if self.training:
             tgt2 = torch.cat(tgt2.split(bs, dim=0), dim=1)
         # ========== End of Self-Attention =============
