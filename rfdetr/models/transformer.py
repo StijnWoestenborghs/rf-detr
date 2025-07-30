@@ -25,7 +25,7 @@ from torch import nn, Tensor
 
 from rfdetr.models.ops.modules import MSDeformAttn
 
-torch.fx.wrap(min)
+# torch.fx.wrap(min)
 
 
 # # Wrap functions that need to be FX-compatible
@@ -67,23 +67,30 @@ def gen_sineembed_for_position(pos_tensor, dim=128):
     pos_y = y_embed[:, :, None] / dim_t
     pos_x = torch.stack((pos_x[:, :, 0::2].sin(), pos_x[:, :, 1::2].cos()), dim=3).flatten(2)
     pos_y = torch.stack((pos_y[:, :, 0::2].sin(), pos_y[:, :, 1::2].cos()), dim=3).flatten(2)
-    if pos_tensor.size(-1) == 2:
-        pos = torch.cat((pos_y, pos_x), dim=2)
-    elif pos_tensor.size(-1) == 4:
-        w_embed = pos_tensor[:, :, 2] * scale
-        pos_w = w_embed[:, :, None] / dim_t
-        pos_w = torch.stack((pos_w[:, :, 0::2].sin(), pos_w[:, :, 1::2].cos()), dim=3).flatten(2)
+    
+    # print("-"*50)
+    # print(pos_tensor.size())
+    # print("-"*50)
 
-        h_embed = pos_tensor[:, :, 3] * scale
-        pos_h = h_embed[:, :, None] / dim_t
-        pos_h = torch.stack((pos_h[:, :, 0::2].sin(), pos_h[:, :, 1::2].cos()), dim=3).flatten(2)
+    # if pos_tensor.size(-1) == 2:
+    #     pos = torch.cat((pos_y, pos_x), dim=2)
+    # elif pos_tensor.size(-1) == 4:
+    
+    # NOTE: HARDCADED ASSUME 4
+    # TODO make this dynamic based on the shape
+    w_embed = pos_tensor[:, :, 2] * scale
+    pos_w = w_embed[:, :, None] / dim_t
+    pos_w = torch.stack((pos_w[:, :, 0::2].sin(), pos_w[:, :, 1::2].cos()), dim=3).flatten(2)
 
-        pos = torch.cat((pos_y, pos_x, pos_w, pos_h), dim=2)
-    else:
-        raise ValueError("Unknown pos_tensor shape(-1):{}".format(pos_tensor.size(-1)))
+    h_embed = pos_tensor[:, :, 3] * scale
+    pos_h = h_embed[:, :, None] / dim_t
+    pos_h = torch.stack((pos_h[:, :, 0::2].sin(), pos_h[:, :, 1::2].cos()), dim=3).flatten(2)
+
+    pos = torch.cat((pos_y, pos_x, pos_w, pos_h), dim=2)
+    # else:
+    #     raise ValueError("Unknown pos_tensor shape(-1):{}".format(pos_tensor.size(-1)))
     return pos
 
-torch.fx.wrap(gen_sineembed_for_position)
 
 def gen_encoder_output_proposals(memory, memory_padding_mask, spatial_shapes, num_levels, unsigmoid=True):
     """
@@ -100,24 +107,34 @@ def gen_encoder_output_proposals(memory, memory_padding_mask, spatial_shapes, nu
     proposals = []
     _cur = 0
 
-    # for lvl in range(num_levels):
-    #     # hws = spatial_shapes.unbind(1)  # list of tensors
-    #     # H_, W_ = hws[0][lvl], hws[1][lvl]
-    #     H_ = spatial_shapes[lvl, 0]
-    #     W_ = spatial_shapes[lvl, 1]
-
-    for lvl, (H_, W_) in enumerate(spatial_shapes):
+    for lvl in range(num_levels):
+        H_ = spatial_shapes[lvl, 0]
+        W_ = spatial_shapes[lvl, 1]
         if memory_padding_mask is not None:
             mask_flatten_ = memory_padding_mask[:, _cur:(_cur + H_ * W_)].view(N_, H_, W_, 1)
             valid_H = torch.sum(~mask_flatten_[:, :, 0, 0], 1)
             valid_W = torch.sum(~mask_flatten_[:, 0, :, 0], 1)
         else:
-            valid_H = torch.tensor([H_ for _ in range(N_)], device=memory.device)
-            valid_W = torch.tensor([W_ for _ in range(N_)], device=memory.device)
+            valid_H = memory.new_tensor([H_ for _ in range(N_)])
+            valid_W = memory.new_tensor([W_ for _ in range(N_)])
 
-        grid_y, grid_x = torch.meshgrid(torch.linspace(0, H_ - 1, H_, dtype=torch.float32, device=memory.device),
-                                        torch.linspace(0, W_ - 1, W_, dtype=torch.float32, device=memory.device))
-        # grid_y, grid_x = create_coordinate_grid(H_, W_, memory.device)
+        if torch.fx._symbolic_trace.is_fx_tracing():
+            # NOTE: HARDCODED for NANO RF-DETR model
+            # TODO: make this dynamic (based on model config)
+            IMG_SIZE = (384, 384)
+            PATCH_SIZE = (16, 16)
+            H_ = IMG_SIZE[0] // PATCH_SIZE[0]
+            W_ = IMG_SIZE[1] // PATCH_SIZE[1]
+        else:
+            H_ = H_
+            W_ = W_
+
+        h_indeces = memory.new_zeros((H_,), dtype=torch.float32)
+        w_indeces = memory.new_zeros((W_,), dtype=torch.float32)
+        h_indeces.copy_(torch.arange(H_, dtype=torch.float32))
+        w_indeces.copy_(torch.arange(W_, dtype=torch.float32))
+        
+        grid_y, grid_x = torch.meshgrid(h_indeces, w_indeces)
         grid = torch.cat([grid_x.unsqueeze(-1), grid_y.unsqueeze(-1)], -1) # H_, W_, 2
 
         scale = torch.cat([valid_W.unsqueeze(-1), valid_H.unsqueeze(-1)], 1).view(N_, 1, 1, 2)
@@ -147,10 +164,7 @@ def gen_encoder_output_proposals(memory, memory_padding_mask, spatial_shapes, nu
         output_memory = output_memory.masked_fill(memory_padding_mask.unsqueeze(-1), float(0))
     output_memory = output_memory.masked_fill(~output_proposals_valid, float(0))
 
-    return output_memory.to(memory.dtype), output_proposals.to(memory.dtype)
-
-
-torch.fx.wrap(gen_encoder_output_proposals)
+    return output_memory.type(memory.dtype), output_proposals.type(memory.dtype)
 
 
 class Transformer(nn.Module):
@@ -269,8 +283,17 @@ class Transformer(nn.Module):
                 else:
                     enc_outputs_coord_unselected_gidx = self.enc_out_bbox_embed[g_idx](
                         output_memory_gidx) + output_proposals # (bs, \sum{hw}, 4) unsigmoid
+                
+                if torch.fx._symbolic_trace.is_fx_tracing():
+                    # NOTE: HARDCODED for NANO RF-DETR model
+                    # TODO: make this dynamic (based on model config)
+                    IMG_SIZE = (384, 384)
+                    PATCH_SIZE = (16, 16)
+                    num_positions = (IMG_SIZE[0] // PATCH_SIZE[0]) * (IMG_SIZE[1] // PATCH_SIZE[1])
+                else:
+                    num_positions = enc_outputs_class_unselected_gidx.shape[-2]
 
-                topk = min(self.num_queries, enc_outputs_class_unselected_gidx.shape[-2])
+                topk = min(self.num_queries, num_positions)
                 # topk_proposals_gidx = torch.topk(enc_outputs_class_unselected_gidx.max(-1)[0], topk, dim=1)[1] # bs, nq
                 topk_proposals_gidx = torch.argsort(enc_outputs_class_unselected_gidx.max(-1)[0], dim=1, descending=True)[:, :topk]
 

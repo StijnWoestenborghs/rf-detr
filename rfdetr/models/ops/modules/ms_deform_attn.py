@@ -38,20 +38,27 @@ def _is_power_of_2(n):
 
 
 def calc_sampling_locations(reference_points, sampling_offsets, input_spatial_shapes, n_points):
-    if reference_points.shape[-1] == 2:
-        offset_normalizer = torch.stack([input_spatial_shapes[..., 1], input_spatial_shapes[..., 0]], -1)
-        sampling_locations = reference_points[:, :, None, :, None, :] \
-                                + sampling_offsets / offset_normalizer[None, None, None, :, None, :]
-    elif reference_points.shape[-1] == 4:
-        sampling_locations = reference_points[:, :, None, :, None, :2] \
-                                + sampling_offsets / n_points * reference_points[:, :, None, :, None, 2:] * 0.5
-    else:
-        raise ValueError(
-            'Last dim of reference_points must be 2 or 4, but get {} instead.'.format(reference_points.shape[-1]))
+    # print("-"*50)
+    # print(reference_points.shape)
+    # print("-"*50)
+    
+    # NOTE: HARDCADED ASSUME 4
+    # TODO make this dynamic based on the shape
+
+    # if reference_points.shape[-1] == 2:
+    #     offset_normalizer = torch.stack([input_spatial_shapes[..., 1], input_spatial_shapes[..., 0]], -1)
+    #     sampling_locations = reference_points[:, :, None, :, None, :] \
+    #                             + sampling_offsets / offset_normalizer[None, None, None, :, None, :]
+    # elif reference_points.shape[-1] == 4:
+    sampling_locations = reference_points[:, :, None, :, None, :2] \
+                            + sampling_offsets / n_points * reference_points[:, :, None, :, None, 2:] * 0.5
+    # else:
+    #     raise ValueError(
+    #         'Last dim of reference_points must be 2 or 4, but get {} instead.'.format(reference_points.shape[-1]))
     return sampling_locations
 
 
-torch.fx.wrap(calc_sampling_locations)
+# torch.fx.wrap(calc_sampling_locations)
 
 
 class MSDeformAttn(nn.Module):
