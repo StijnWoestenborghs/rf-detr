@@ -25,15 +25,13 @@ from transformers.utils import (
     add_start_docstrings_to_model_forward,
     logging,
     replace_return_docstrings,
-    torch_int,
+    # torch_int,
 )
 from transformers.utils.backbone_utils import BackboneMixin
 
 from transformers.configuration_utils import PretrainedConfig
 from transformers.utils.backbone_utils import BackboneConfigMixin, get_aligned_output_features_output_indices
 
-
-torch.fx.wrap(torch_int)
 
 logger = logging.get_logger(__name__)
 
@@ -245,12 +243,11 @@ class WindowedDinov2WithRegistersEmbeddings(nn.Module):
         - https://github.com/facebookresearch/dinov2/blob/main/dinov2/models/vision_transformer.py
         """
         num_patches = embeddings.shape[1] - 1
-        num_positions = self.position_embeddings.shape[1] - 1
+        num_positions = (self.config.image_size // self.config.patch_size) * (self.config.image_size // self.config.patch_size)
 
         # Skip interpolation for matching dimensions (unless tracing)
-        if not torch.fx._symbolic_trace.is_fx_tracing():
-            if not torch.jit.is_tracing() and num_patches == num_positions and height == width:
-                return self.position_embeddings
+        if not torch.fx._symbolic_trace.is_fx_tracing() and num_patches == num_positions and height == width:
+            return self.position_embeddings
 
         # Handle class token and patch embeddings separately
         class_pos_embed = self.position_embeddings[:, 0]
@@ -262,7 +259,7 @@ class WindowedDinov2WithRegistersEmbeddings(nn.Module):
         width = width // self.config.patch_size
 
         # Reshape for interpolation
-        sqrt_num_positions = torch_int(num_positions**0.5)
+        sqrt_num_positions = int(num_positions**0.5)
         patch_pos_embed = patch_pos_embed.reshape(1, sqrt_num_positions, sqrt_num_positions, dim)
         patch_pos_embed = patch_pos_embed.permute(0, 3, 1, 2)
 
@@ -271,12 +268,12 @@ class WindowedDinov2WithRegistersEmbeddings(nn.Module):
 
         # Interpolate at float32 precision
         patch_pos_embed = nn.functional.interpolate(
-            patch_pos_embed.to(dtype=torch.float32),
-            size=(torch_int(height), torch_int(width)),  # Explicit size instead of scale_factor
+            patch_pos_embed.type(dtype=torch.float32),
+            size=(height, width),  # Explicit size instead of scale_factor
             mode="bicubic",
             align_corners=False,
             antialias=True,
-        ).to(dtype=target_dtype)
+        ).type(target_dtype)
 
         # Validate output dimensions if not tracing
         if not torch.fx._symbolic_trace.is_fx_tracing():
@@ -293,11 +290,11 @@ class WindowedDinov2WithRegistersEmbeddings(nn.Module):
     def forward(self, pixel_values: torch.Tensor, bool_masked_pos: Optional[torch.Tensor] = None) -> torch.Tensor:
         batch_size, _, height, width = pixel_values.shape
         target_dtype = self.patch_embeddings.projection.weight.dtype
-        embeddings = self.patch_embeddings(pixel_values.to(dtype=target_dtype))
+        embeddings = self.patch_embeddings(pixel_values.type(dtype=target_dtype))
 
         if bool_masked_pos is not None:
             embeddings = torch.where(
-                bool_masked_pos.unsqueeze(-1), self.mask_token.to(embeddings.dtype).unsqueeze(0), embeddings
+                bool_masked_pos.unsqueeze(-1), self.mask_token.type(embeddings.dtype).unsqueeze(0), embeddings
             )
 
         # add the [CLS] token to the embedded patch tokens

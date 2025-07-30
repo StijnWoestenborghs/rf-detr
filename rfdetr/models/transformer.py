@@ -69,7 +69,7 @@ def gen_sineembed_for_position(pos_tensor, dim=128):
     # n_query, bs, _ = pos_tensor.size()
     # sineembed_tensor = torch.zeros(n_query, bs, 256)
     scale = 2 * math.pi
-    dim_t = torch.arange(dim, dtype=pos_tensor.dtype).to(pos_tensor.device)
+    dim_t = pos_tensor.new_tensor(torch.arange(dim, dtype=pos_tensor.dtype)) # unexplicit cast to pos_tensor.device
     dim_t = 10000 ** (2 * (dim_t // 2) / dim)
     x_embed = pos_tensor[:, :, 0] * scale
     y_embed = pos_tensor[:, :, 1] * scale
@@ -228,8 +228,8 @@ class Transformer(nn.Module):
         _, H, W = mask.shape
         valid_H = torch.sum(~mask[:, :, 0], 1)
         valid_W = torch.sum(~mask[:, 0, :], 1)
-        valid_ratio_h = valid_H.float() / H
-        valid_ratio_w = valid_W.float() / W
+        valid_ratio_h = valid_H.type(torch.float32) / H
+        valid_ratio_w = valid_W.type(torch.float32) / W
         valid_ratio = torch.stack([valid_ratio_w, valid_ratio_h], -1)
         return valid_ratio
 
@@ -261,7 +261,8 @@ class Transformer(nn.Module):
         lvl_pos_embed_flatten = torch.cat(lvl_pos_embed_flatten, 1) # bs, \sum{hxw}, c 
         # spatial_shapes = torch.as_tensor(spatial_shapes, dtype=torch.long, device=memory.device)
         # spatial_shapes = torch.stack(spatial_shapes, dim=0).to(memory.device)
-        spatial_shapes = calculate_spatial_shapes(srcs).to(memory.device)
+        spatial_shapes = calculate_spatial_shapes(srcs)#.to(memory.device)
+
         level_start_index = torch.cat((spatial_shapes.new_zeros((1, )), spatial_shapes.prod(1).cumsum(0)[:-1]))
         
         if self.two_stage:
@@ -332,7 +333,7 @@ class Transformer(nn.Module):
                             pos=lvl_pos_embed_flatten, refpoints_unsigmoid=refpoint_embed,
                             level_start_index=level_start_index, 
                             spatial_shapes=spatial_shapes,
-                            valid_ratios=valid_ratios.to(memory.dtype) if valid_ratios is not None else valid_ratios)
+                            valid_ratios=valid_ratios.type(memory.dtype) if valid_ratios is not None else valid_ratios)
         else:
             assert self.two_stage, "if not using decoder, two_stage must be True"
             hs = None
@@ -404,13 +405,13 @@ class TransformerDecoder(nn.Module):
             obj_center = refpoints[..., :4]
             
             if self._export:
-                query_sine_embed = gen_sineembed_for_position(obj_center, self.d_model / 2) # bs, nq, 256*2 
+                query_sine_embed = gen_sineembed_for_position(obj_center, self.d_model // 2) # bs, nq, 256*2 
                 refpoints_input = obj_center[:, :, None] # bs, nq, 1, 4
             else:
                 refpoints_input = obj_center[:, :, None] \
                                         * torch.cat([valid_ratios, valid_ratios], -1)[:, None] # bs, nq, nlevel, 4
                 query_sine_embed = gen_sineembed_for_position(
-                    refpoints_input[:, :, 0, :], self.d_model / 2) # bs, nq, 256*2 
+                    refpoints_input[:, :, 0, :], self.d_model // 2) # bs, nq, 256*2 
             query_pos = self.ref_point_head(query_sine_embed)
             return obj_center, refpoints_input, query_pos, query_sine_embed
         

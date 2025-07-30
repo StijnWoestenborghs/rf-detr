@@ -27,7 +27,7 @@ class Joiner(nn.Sequential):
         x = self[0](tensor_list)
         pos = []
         for x_ in x:
-            pos.append(self[1](x_, align_dim_orders=False).to(x_.tensors.dtype))
+            pos.append(self[1](x_, align_dim_orders=False).type(x_.tensors.dtype))
         return x, pos
 
     def export(self):
@@ -47,7 +47,7 @@ class Joiner(nn.Sequential):
         feats, masks = self[0](inputs)
         poss = []
         for feat, mask in zip(feats, masks):
-            poss.append(self[1](mask, align_dim_orders=False).to(feat.dtype))
+            poss.append(self[1](mask, align_dim_orders=False).type(feat.dtype))
         return feats, None, poss
 
 
