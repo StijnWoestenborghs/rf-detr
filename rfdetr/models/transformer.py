@@ -38,18 +38,6 @@ torch.fx.wrap(min)
 # torch.fx.wrap(create_coordinate_grid)
 
 
-def calculate_spatial_shapes(srcs):
-    spatial_shapes = []
-    for src in srcs:
-        _, _, h, w = src.shape
-        spatial_shape = (h, w)
-        spatial_shapes.append(spatial_shape)
-    spatial_shapes = torch.as_tensor(spatial_shapes, dtype=torch.long)
-    return spatial_shapes
-
-torch.fx.wrap(calculate_spatial_shapes)
-
-
 class MLP(nn.Module):
     """ Very simple multi-layer perceptron (also called FFN)"""
 
@@ -239,15 +227,11 @@ class Transformer(nn.Module):
         src_flatten = []
         mask_flatten = [] if masks is not None else None
         lvl_pos_embed_flatten = []
-        # spatial_shapes = []
+        spatial_shapes = []
         valid_ratios = [] if masks is not None else None
         for lvl, (src, pos_embed) in enumerate(zip(srcs, pos_embeds)):
             bs, c, h, w = src.shape
-            # spatial_shape = (h, w)
-            # shape_tensor = torch.zeros(2, dtype=torch.long)
-            # shape_tensor[0] = h
-            # shape_tensor[1] = w
-            # spatial_shapes.append(shape_tensor)
+            spatial_shapes.append(src.new_tensor([h, w], dtype=torch.long))
 
             src = src.flatten(2).transpose(1, 2)                # bs, hw, c
             pos_embed = pos_embed.flatten(2).transpose(1, 2)    # bs, hw, c
@@ -261,9 +245,7 @@ class Transformer(nn.Module):
             mask_flatten = torch.cat(mask_flatten, 1)   # bs, \sum{hxw}
             valid_ratios = torch.stack([self.get_valid_ratio(m) for m in masks], 1)
         lvl_pos_embed_flatten = torch.cat(lvl_pos_embed_flatten, 1) # bs, \sum{hxw}, c 
-        # spatial_shapes = torch.as_tensor(spatial_shapes, dtype=torch.long, device=memory.device)
-        # spatial_shapes = torch.stack(spatial_shapes, dim=0).to(memory.device)
-        spatial_shapes = calculate_spatial_shapes(srcs)#.to(memory.device)
+        spatial_shapes = torch.stack(spatial_shapes, dim=0)
 
         level_start_index = torch.cat((spatial_shapes.new_zeros((1, )), spatial_shapes.prod(1).cumsum(0)[:-1]))
         
