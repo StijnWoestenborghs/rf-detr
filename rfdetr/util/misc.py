@@ -355,7 +355,8 @@ def nested_tensor_from_proxy(batch: Tensor) -> NestedTensor:
     B, C, H, W = 5, 3, 384, 384
 
     # since all images are the same size, mask is all zeros
-    mask = batch.new_tensor(torch.zeros((B, H, W), dtype=torch.bool)) # unexplicit cast to batch.device
+    # unexplicit cast to batch.device
+    mask = batch.new_zeros((B, H, W), dtype=torch.bool)
 
     return NestedTensor(batch, mask)
 
