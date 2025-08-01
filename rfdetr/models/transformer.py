@@ -126,15 +126,16 @@ def gen_encoder_output_proposals(memory, memory_padding_mask, spatial_shapes, nu
             valid_H = torch.sum(~mask_flatten_[:, :, 0, 0], 1)
             valid_W = torch.sum(~mask_flatten_[:, 0, :, 0], 1)
         else:
-            valid_H = memory.new_tensor([H_ for _ in range(N_)])
-            valid_W = memory.new_tensor([W_ for _ in range(N_)])
+            valid_H = memory.new_full((1, N_), H_)
+            valid_W = memory.new_full((1, N_), W_)
 
-        h_indeces = memory.new_zeros((H_,), dtype=torch.float32)
-        w_indeces = memory.new_zeros((W_,), dtype=torch.float32)
+
+        h_indeces = memory.new_zeros((1, H_), dtype=torch.float32)
+        w_indeces = memory.new_zeros((1, W_), dtype=torch.float32)
         h_indeces.copy_(torch.arange(H_, dtype=torch.float32))
         w_indeces.copy_(torch.arange(W_, dtype=torch.float32))
         
-        grid_y, grid_x = torch.meshgrid(h_indeces, w_indeces)
+        grid_y, grid_x = torch.meshgrid(h_indeces.squeeze(), w_indeces.squeeze())
         grid = torch.cat([grid_x.unsqueeze(-1), grid_y.unsqueeze(-1)], -1) # H_, W_, 2
 
         scale = torch.cat([valid_W.unsqueeze(-1), valid_H.unsqueeze(-1)], 1).view(N_, 1, 1, 2)
