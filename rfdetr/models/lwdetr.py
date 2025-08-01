@@ -122,85 +122,86 @@ class LWDETR(nn.Module):
     def export(self):
         self._export = True
         self._forward_origin = self.forward
-        self.forward = self.forward_export
+        # self.forward = self.forward_export
         for name, m in self.named_modules():
             if hasattr(m, "export") and isinstance(m.export, Callable) and hasattr(m, "_export") and not m._export:
                 m.export()
 
-    def forward(self, samples: NestedTensor): # , targets=None
-        """ The forward expects a NestedTensor, which consists of:
-               - samples.tensor: batched images, of shape [batch_size x 3 x H x W]
-               - samples.mask: a binary mask of shape [batch_size x H x W], containing 1 on padded pixels
+    # def forward(self, samples: NestedTensor): # , targets=None
+    #     """ The forward expects a NestedTensor, which consists of:
+    #            - samples.tensor: batched images, of shape [batch_size x 3 x H x W]
+    #            - samples.mask: a binary mask of shape [batch_size x H x W], containing 1 on padded pixels
 
-            It returns a dict with the following elements:
-               - "pred_logits": the classification logits (including no-object) for all queries.
-                                Shape= [batch_size x num_queries x num_classes]
-               - "pred_boxes": The normalized boxes coordinates for all queries, represented as
-                               (center_x, center_y, width, height). These values are normalized in [0, 1],
-                               relative to the size of each individual image (disregarding possible padding).
-                               See PostProcess for information on how to retrieve the unnormalized bounding box.
-               - "aux_outputs": Optional, only returned when auxilary losses are activated. It is a list of
-                                dictionnaries containing the two above keys for each decoder layer.
-        """
-        if isinstance(samples, (list, torch.Tensor)):
-            samples = nested_tensor_from_tensor_list(samples)
-        elif isinstance(samples, torch.fx.proxy.Proxy):
-            samples = nested_tensor_from_proxy(samples)
-        features, poss = self.backbone(samples)
+    #         It returns a dict with the following elements:
+    #            - "pred_logits": the classification logits (including no-object) for all queries.
+    #                             Shape= [batch_size x num_queries x num_classes]
+    #            - "pred_boxes": The normalized boxes coordinates for all queries, represented as
+    #                            (center_x, center_y, width, height). These values are normalized in [0, 1],
+    #                            relative to the size of each individual image (disregarding possible padding).
+    #                            See PostProcess for information on how to retrieve the unnormalized bounding box.
+    #            - "aux_outputs": Optional, only returned when auxilary losses are activated. It is a list of
+    #                             dictionnaries containing the two above keys for each decoder layer.
+    #     """
+    #     if isinstance(samples, (list, torch.Tensor)):
+    #         samples = nested_tensor_from_tensor_list(samples)
+    #     elif isinstance(samples, torch.fx.proxy.Proxy):
+    #         samples = nested_tensor_from_proxy(samples)
+    #     features, poss = self.backbone(samples)
 
-        srcs = []
-        masks = []
-        for l, feat in enumerate(features):
-            src, mask = feat.decompose()
-            srcs.append(src)
-            masks.append(mask)
-            assert mask is not None
+    #     srcs = []
+    #     masks = []
+    #     for l, feat in enumerate(features):
+    #         src, mask = feat.decompose()
+    #         srcs.append(src)
+    #         masks.append(mask)
+    #         assert mask is not None
 
-        if self.training:
-            refpoint_embed_weight = self.refpoint_embed.weight
-            query_feat_weight = self.query_feat.weight
-        else:
-            # only use one group in inference
-            refpoint_embed_weight = self.refpoint_embed.weight[:self.num_queries]
-            query_feat_weight = self.query_feat.weight[:self.num_queries]
+    #     if self.training:
+    #         refpoint_embed_weight = self.refpoint_embed.weight
+    #         query_feat_weight = self.query_feat.weight
+    #     else:
+    #         # only use one group in inference
+    #         refpoint_embed_weight = self.refpoint_embed.weight[:self.num_queries]
+    #         query_feat_weight = self.query_feat.weight[:self.num_queries]
 
-        hs, ref_unsigmoid, hs_enc, ref_enc = self.transformer(
-            srcs, masks, poss, refpoint_embed_weight, query_feat_weight)
+    #     hs, ref_unsigmoid, hs_enc, ref_enc = self.transformer(
+    #         srcs, masks, poss, refpoint_embed_weight, query_feat_weight)
 
-        if hs is not None:
-            if self.bbox_reparam:
-                outputs_coord_delta = self.bbox_embed(hs)
-                outputs_coord_cxcy = outputs_coord_delta[..., :2] * ref_unsigmoid[..., 2:] + ref_unsigmoid[..., :2]
-                outputs_coord_wh = outputs_coord_delta[..., 2:].exp() * ref_unsigmoid[..., 2:]
-                outputs_coord = torch.concat(
-                    [outputs_coord_cxcy, outputs_coord_wh], dim=-1
-                )
-            else:
-                outputs_coord = (self.bbox_embed(hs) + ref_unsigmoid).sigmoid()
+    #     if hs is not None:
+    #         if self.bbox_reparam:
+    #             outputs_coord_delta = self.bbox_embed(hs)
+    #             outputs_coord_cxcy = outputs_coord_delta[..., :2] * ref_unsigmoid[..., 2:] + ref_unsigmoid[..., :2]
+    #             outputs_coord_wh = outputs_coord_delta[..., 2:].exp() * ref_unsigmoid[..., 2:]
+    #             outputs_coord = torch.concat(
+    #                 [outputs_coord_cxcy, outputs_coord_wh], dim=-1
+    #             )
+    #         else:
+    #             outputs_coord = (self.bbox_embed(hs) + ref_unsigmoid).sigmoid()
 
-            outputs_class = self.class_embed(hs)
+    #         outputs_class = self.class_embed(hs)
 
-            out = {'pred_logits': outputs_class[-1], 'pred_boxes': outputs_coord[-1]}
-            if not torch.fx._symbolic_trace.is_fx_tracing():
-                if self.aux_loss:
-                    out['aux_outputs'] = self._set_aux_loss(outputs_class, outputs_coord)
+    #         out = {'pred_logits': outputs_class[-1], 'pred_boxes': outputs_coord[-1]}
+    #         if not torch.fx._symbolic_trace.is_fx_tracing():
+    #             if self.aux_loss:
+    #                 out['aux_outputs'] = self._set_aux_loss(outputs_class, outputs_coord)
 
-        if self.two_stage:
-            group_detr = self.group_detr if self.training else 1
-            hs_enc_list = hs_enc.chunk(group_detr, dim=1)
-            cls_enc = []
-            for g_idx in range(group_detr):
-                cls_enc_gidx = self.transformer.enc_out_class_embed[g_idx](hs_enc_list[g_idx])
-                cls_enc.append(cls_enc_gidx)
-            cls_enc = torch.cat(cls_enc, dim=1)
-            if hs is not None:
-                out['enc_outputs'] = {'pred_logits': cls_enc, 'pred_boxes': ref_enc}
-            else:
-                out = {'pred_logits': cls_enc, 'pred_boxes': ref_enc}
+    #     if self.two_stage:
+    #         group_detr = self.group_detr if self.training else 1
+    #         hs_enc_list = hs_enc.chunk(group_detr, dim=1)
+    #         cls_enc = []
+    #         for g_idx in range(group_detr):
+    #             cls_enc_gidx = self.transformer.enc_out_class_embed[g_idx](hs_enc_list[g_idx])
+    #             cls_enc.append(cls_enc_gidx)
+    #         cls_enc = torch.cat(cls_enc, dim=1)
+    #         if hs is not None:
+    #             out['enc_outputs'] = {'pred_logits': cls_enc, 'pred_boxes': ref_enc}
+    #         else:
+    #             out = {'pred_logits': cls_enc, 'pred_boxes': ref_enc}
         
-        return out
+    #     return out
 
-    def forward_export(self, tensors):
+    # def forward_export(self, tensors):
+    def forward(self, tensors):
         srcs, _, poss = self.backbone(tensors)
         # only use one group in inference
         refpoint_embed_weight = self.refpoint_embed.weight[:self.num_queries]

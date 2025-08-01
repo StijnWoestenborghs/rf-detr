@@ -22,18 +22,18 @@ class Joiner(nn.Sequential):
         super().__init__(backbone, position_embedding)
         self._export = False
 
-    def forward(self, tensor_list: NestedTensor):
-        """ """
-        x = self[0](tensor_list)
-        pos = []
-        for x_ in x:
-            pos.append(self[1](x_, align_dim_orders=False).type(x_.tensors.dtype))
-        return x, pos
+    # def forward(self, tensor_list: NestedTensor):
+    #     """ """
+    #     x = self[0](tensor_list)
+    #     pos = []
+    #     for x_ in x:
+    #         pos.append(self[1](x_, align_dim_orders=False).type(x_.tensors.dtype))
+    #     return x, pos
 
     def export(self):
         self._export = True
         self._forward_origin = self.forward
-        self.forward = self.forward_export
+        # self.forward = self.forward_export
         for name, m in self.named_modules():
             if (
                 hasattr(m, "export")
@@ -43,7 +43,8 @@ class Joiner(nn.Sequential):
             ):
                 m.export()
 
-    def forward_export(self, inputs: torch.Tensor):
+    # def forward_export(self, inputs: torch.Tensor):
+    def forward(self, inputs: torch.Tensor):
         feats, masks = self[0](inputs)
         poss = []
         for feat, mask in zip(feats, masks):

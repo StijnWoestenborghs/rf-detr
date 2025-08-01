@@ -108,16 +108,6 @@ def gen_encoder_output_proposals(memory, memory_padding_mask, spatial_shapes, nu
     _cur = 0
 
     for lvl in range(num_levels):
-        H_ = spatial_shapes[lvl, 0]
-        W_ = spatial_shapes[lvl, 1]
-        if memory_padding_mask is not None:
-            mask_flatten_ = memory_padding_mask[:, _cur:(_cur + H_ * W_)].view(N_, H_, W_, 1)
-            valid_H = torch.sum(~mask_flatten_[:, :, 0, 0], 1)
-            valid_W = torch.sum(~mask_flatten_[:, 0, :, 0], 1)
-        else:
-            valid_H = memory.new_tensor([H_ for _ in range(N_)])
-            valid_W = memory.new_tensor([W_ for _ in range(N_)])
-
         if torch.fx._symbolic_trace.is_fx_tracing():
             # NOTE: HARDCODED for NANO RF-DETR model
             # TODO: make this dynamic (based on model config)
@@ -125,9 +115,19 @@ def gen_encoder_output_proposals(memory, memory_padding_mask, spatial_shapes, nu
             PATCH_SIZE = (16, 16)
             H_ = IMG_SIZE[0] // PATCH_SIZE[0]
             W_ = IMG_SIZE[1] // PATCH_SIZE[1]
+            N_ = num_levels
         else:
-            H_ = H_
-            W_ = W_
+            H_ = spatial_shapes[lvl, 0]
+            W_ = spatial_shapes[lvl, 1]
+            N_ = N_
+
+        if memory_padding_mask is not None:
+            mask_flatten_ = memory_padding_mask[:, _cur:(_cur + H_ * W_)].view(N_, H_, W_, 1)
+            valid_H = torch.sum(~mask_flatten_[:, :, 0, 0], 1)
+            valid_W = torch.sum(~mask_flatten_[:, 0, :, 0], 1)
+        else:
+            valid_H = memory.new_tensor([H_ for _ in range(N_)])
+            valid_W = memory.new_tensor([W_ for _ in range(N_)])
 
         h_indeces = memory.new_zeros((H_,), dtype=torch.float32)
         w_indeces = memory.new_zeros((W_,), dtype=torch.float32)
@@ -411,14 +411,14 @@ class TransformerDecoder(nn.Module):
             # [num_queries, batch_size, 4]
             obj_center = refpoints[..., :4]
             
-            if self._export:
-                query_sine_embed = gen_sineembed_for_position(obj_center, self.d_model // 2) # bs, nq, 256*2 
-                refpoints_input = obj_center[:, :, None] # bs, nq, 1, 4
-            else:
-                refpoints_input = obj_center[:, :, None] \
-                                        * torch.cat([valid_ratios, valid_ratios], -1)[:, None] # bs, nq, nlevel, 4
-                query_sine_embed = gen_sineembed_for_position(
-                    refpoints_input[:, :, 0, :], self.d_model // 2) # bs, nq, 256*2 
+            # if self._export:
+            query_sine_embed = gen_sineembed_for_position(obj_center, self.d_model // 2) # bs, nq, 256*2 
+            refpoints_input = obj_center[:, :, None] # bs, nq, 1, 4
+            # else:
+            #     refpoints_input = obj_center[:, :, None] \
+            #                             * torch.cat([valid_ratios, valid_ratios], -1)[:, None] # bs, nq, nlevel, 4
+            #     query_sine_embed = gen_sineembed_for_position(
+            #         refpoints_input[:, :, 0, :], self.d_model // 2) # bs, nq, 256*2 
             query_pos = self.ref_point_head(query_sine_embed)
             return obj_center, refpoints_input, query_pos, query_sine_embed
         
@@ -470,25 +470,25 @@ class TransformerDecoder(nn.Module):
                 intermediate.append(output)
 
         if self.return_intermediate:
-            if self._export:
-                # to shape: B, N, C
-                hs = intermediate[-1]
-                if self.bbox_embed is not None:
-                    ref = hs_refpoints_unsigmoid[-1]
-                else:
-                    ref = refpoints_unsigmoid
-                return hs, ref
-            # box iterative update
+            # if self._export:
+            # to shape: B, N, C
+            hs = intermediate[-1]
             if self.bbox_embed is not None:
-                return [
-                    torch.stack(intermediate),
-                    torch.stack(hs_refpoints_unsigmoid),
-                ]
+                ref = hs_refpoints_unsigmoid[-1]
             else:
-                return [
-                    torch.stack(intermediate), 
-                    refpoints_unsigmoid.unsqueeze(0)
-                ]
+                ref = refpoints_unsigmoid
+            return hs, ref
+            # # box iterative update
+            # if self.bbox_embed is not None:
+            #     return [
+            #         torch.stack(intermediate),
+            #         torch.stack(hs_refpoints_unsigmoid),
+            #     ]
+            # else:
+            #     return [
+            #         torch.stack(intermediate), 
+            #         refpoints_unsigmoid.unsqueeze(0)
+            #     ]
 
         return output.unsqueeze(0)
 

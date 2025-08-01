@@ -43,39 +43,40 @@ class PositionEmbeddingSine(nn.Module):
     def export(self):
         self._export = True
         self._forward_origin = self.forward
-        self.forward = self.forward_export
+        # self.forward = self.forward_export
 
-    def forward(self, tensor_list: NestedTensor, align_dim_orders = True):
-        x = tensor_list.tensors
-        mask = tensor_list.mask
-        assert mask is not None
-        not_mask = ~mask
-        y_embed = not_mask.cumsum(1, dtype=torch.float32)
-        x_embed = not_mask.cumsum(2, dtype=torch.float32)
-        if self.normalize:
-            eps = 1e-6
-            y_embed = y_embed / (y_embed[:, -1:, :] + eps) * self.scale
-            x_embed = x_embed / (x_embed[:, :, -1:] + eps) * self.scale
+    # def forward(self, tensor_list: NestedTensor, align_dim_orders = True):
+    #     x = tensor_list.tensors
+    #     mask = tensor_list.mask
+    #     assert mask is not None
+    #     not_mask = ~mask
+    #     y_embed = not_mask.cumsum(1, dtype=torch.float32)
+    #     x_embed = not_mask.cumsum(2, dtype=torch.float32)
+    #     if self.normalize:
+    #         eps = 1e-6
+    #         y_embed = y_embed / (y_embed[:, -1:, :] + eps) * self.scale
+    #         x_embed = x_embed / (x_embed[:, :, -1:] + eps) * self.scale
 
-        # unexplicit cast to x.device
-        dim_t = x.new_zeros((self.num_pos_feats,), dtype=torch.float32)
-        dim_t.copy_(torch.arange(self.num_pos_feats, dtype=torch.float32))
+    #     # unexplicit cast to x.device
+    #     dim_t = x.new_zeros((self.num_pos_feats,), dtype=torch.float32)
+    #     dim_t.copy_(torch.arange(self.num_pos_feats, dtype=torch.float32))
         
-        dim_t = self.temperature ** (2 * (dim_t // 2) / self.num_pos_feats)
+    #     dim_t = self.temperature ** (2 * (dim_t // 2) / self.num_pos_feats)
 
-        pos_x = x_embed[:, :, :, None] / dim_t
-        pos_y = y_embed[:, :, :, None] / dim_t
-        pos_x = torch.stack((pos_x[:, :, :, 0::2].sin(), pos_x[:, :, :, 1::2].cos()), dim=4).flatten(3)
-        pos_y = torch.stack((pos_y[:, :, :, 0::2].sin(), pos_y[:, :, :, 1::2].cos()), dim=4).flatten(3)
-        if align_dim_orders:
-            pos = torch.cat((pos_y, pos_x), dim=3).permute(1, 2, 0, 3)
-            # return: (H, W, bs, C)
-        else:
-            pos = torch.cat((pos_y, pos_x), dim=3).permute(0, 3, 1, 2)
-            # return: (bs, C, H, W)
-        return pos
+    #     pos_x = x_embed[:, :, :, None] / dim_t
+    #     pos_y = y_embed[:, :, :, None] / dim_t
+    #     pos_x = torch.stack((pos_x[:, :, :, 0::2].sin(), pos_x[:, :, :, 1::2].cos()), dim=4).flatten(3)
+    #     pos_y = torch.stack((pos_y[:, :, :, 0::2].sin(), pos_y[:, :, :, 1::2].cos()), dim=4).flatten(3)
+    #     if align_dim_orders:
+    #         pos = torch.cat((pos_y, pos_x), dim=3).permute(1, 2, 0, 3)
+    #         # return: (H, W, bs, C)
+    #     else:
+    #         pos = torch.cat((pos_y, pos_x), dim=3).permute(0, 3, 1, 2)
+    #         # return: (bs, C, H, W)
+    #     return pos
     
-    def forward_export(self, mask:torch.Tensor, align_dim_orders = True):
+    # def forward_export(self, mask:torch.Tensor, align_dim_orders = True):
+    def forward(self, mask:torch.Tensor, align_dim_orders = True):
         assert mask is not None
         not_mask = ~mask
         y_embed = not_mask.cumsum(1, dtype=torch.float32)
@@ -85,7 +86,10 @@ class PositionEmbeddingSine(nn.Module):
             y_embed = y_embed / (y_embed[:, -1:, :] + eps) * self.scale
             x_embed = x_embed / (x_embed[:, :, -1:] + eps) * self.scale
 
-        dim_t = torch.arange(self.num_pos_feats, dtype=torch.float32, device=mask.device)
+        # dim_t = torch.arange(self.num_pos_feats, dtype=torch.float32, device=mask.device)
+        # unexplicit cast to x.device
+        dim_t = mask.new_zeros((self.num_pos_feats,), dtype=torch.float32)
+        dim_t.copy_(torch.arange(self.num_pos_feats, dtype=torch.float32))
         dim_t = self.temperature ** (2 * (dim_t // 2) / self.num_pos_feats)
 
         pos_x = x_embed[:, :, :, None] / dim_t

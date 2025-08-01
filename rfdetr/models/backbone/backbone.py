@@ -112,29 +112,30 @@ class Backbone(BackboneBase):
     def export(self):
         self._export = True
         self._forward_origin = self.forward
-        self.forward = self.forward_export
+        # self.forward = self.forward_export
 
         if isinstance(self.encoder, PeftModel):
             print("Merging and unloading LoRA weights")
             self.encoder.merge_and_unload()
 
-    def forward(self, tensor_list: NestedTensor):
-        """ """
-        # (H, W, B, C)
-        feats = self.encoder(tensor_list.tensors)
-        feats = self.projector(feats)
-        # x: [(B, C, H, W)]
-        out = []
-        for feat in feats:
-            m = tensor_list.mask
-            assert m is not None
-            mask = F.interpolate(m[None].type(torch.float32), size=feat.shape[-2:]).type(torch.bool)[
-                0
-            ]
-            out.append(NestedTensor(feat, mask))
-        return out
+    # def forward(self, tensor_list: NestedTensor):
+    #     """ """
+    #     # (H, W, B, C)
+    #     feats = self.encoder(tensor_list.tensors)
+    #     feats = self.projector(feats)
+    #     # x: [(B, C, H, W)]
+    #     out = []
+    #     for feat in feats:
+    #         m = tensor_list.mask
+    #         assert m is not None
+    #         mask = F.interpolate(m[None].type(torch.float32), size=feat.shape[-2:]).type(torch.bool)[
+    #             0
+    #         ]
+    #         out.append(NestedTensor(feat, mask))
+    #     return out
 
-    def forward_export(self, tensors: torch.Tensor):
+    # def forward_export(self, tensors: torch.Tensor):
+    def forward(self, tensors: torch.Tensor):
         feats = self.encoder(tensors)
         feats = self.projector(feats)
         out_feats = []
@@ -143,7 +144,8 @@ class Backbone(BackboneBase):
             # x: [(B, C, H, W)]
             b, _, h, w = feat.shape
             out_masks.append(
-                torch.zeros((b, h, w), dtype=torch.bool, device=feat.device)
+                # torch.zeros((b, h, w), dtype=torch.bool, device=feat.device)
+                feat.new_ones((b, h, w), dtype=torch.bool)
             )
             out_feats.append(feat)
         return out_feats, out_masks
