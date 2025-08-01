@@ -329,6 +329,13 @@ class Transformer(nn.Module):
             refpoint_embed = refpoint_embed.unsqueeze(0).repeat(bs, 1, 1)
             if self.two_stage:
                 ts_len = refpoint_embed_ts.shape[-2]
+
+                if torch.fx._symbolic_trace.is_fx_tracing():
+                    # NOTE: HARDCODED for NANO RF-DETR model
+                    # TODO: make this dynamic (based on model config)
+                    NUM_QUERIES = 300 
+                    ts_len = NUM_QUERIES # ?
+
                 refpoint_embed_ts_subset = refpoint_embed[..., :ts_len, :]
                 refpoint_embed_subset = refpoint_embed[..., ts_len:, :]
 
