@@ -225,8 +225,9 @@ class LWDETR(nn.Module):
             assert self.two_stage, "if not using decoder, two_stage must be True"
             outputs_class = self.transformer.enc_out_class_embed[0](hs_enc)
             outputs_coord = ref_enc
-            
-        return outputs_coord, outputs_class
+
+        return torch.cat([outputs_coord, outputs_class], dim=-1)
+
 
     @torch.jit.unused
     def _set_aux_loss(self, outputs_class, outputs_coord):

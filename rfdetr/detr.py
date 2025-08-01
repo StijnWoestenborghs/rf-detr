@@ -311,7 +311,8 @@ class RFDETR:
                 predictions = self.model.inference_model(batch_tensor.to(dtype=self._optimized_dtype))
             else:
                 predictions = self.model.model(batch_tensor)
-            if isinstance(predictions, tuple):
+            if isinstance(predictions, torch.Tensor):
+                predictions = torch.split(predictions, [4, 91], dim=-1)
                 predictions = {
                     "pred_logits": predictions[1],
                     "pred_boxes": predictions[0]
