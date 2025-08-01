@@ -34,7 +34,18 @@ def ms_deform_attn_core_pytorch(value, value_spatial_shapes, sampling_locations,
     # [H * W for H, W in value_spatial_shapes]
     value_list = []
     for i in range(n_levels):
-        value_list.append(value_spatial_shapes[i][0] * value_spatial_shapes[i][1])
+
+        if torch.fx._symbolic_trace.is_fx_tracing():
+            # NOTE: HARDCODED for NANO RF-DETR model
+            # TODO: make this dynamic (based on model config)
+            IMG_SIZE = (384, 384)
+            PATCH_SIZE = (16, 16)
+            h = IMG_SIZE[0] // PATCH_SIZE[0]
+            w = IMG_SIZE[1] // PATCH_SIZE[1]
+            value_list.append(h * w)
+        else:
+            value_list.append(value_spatial_shapes[i][0] * value_spatial_shapes[i][1])
+    
     value_list = value.split(value_list, dim=3)
     
     sampling_grids = 2 * sampling_locations - 1
