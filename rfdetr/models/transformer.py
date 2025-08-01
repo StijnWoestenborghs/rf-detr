@@ -245,6 +245,15 @@ class Transformer(nn.Module):
         valid_ratios = [] if masks is not None else None
         for lvl, (src, pos_embed) in enumerate(zip(srcs, pos_embeds)):
             bs, c, h, w = src.shape
+
+            if torch.fx._symbolic_trace.is_fx_tracing():
+                # NOTE: HARDCODED for NANO RF-DETR model
+                # TODO: make this dynamic (based on model config)
+                IMG_SIZE = (384, 384)
+                PATCH_SIZE = (16, 16)
+                h = IMG_SIZE[0] // PATCH_SIZE[0]
+                w = IMG_SIZE[1] // PATCH_SIZE[1]
+
             spatial_shapes.append(src.new_tensor([h, w], dtype=torch.long))
 
             src = src.flatten(2).transpose(1, 2)                # bs, hw, c
@@ -369,6 +378,7 @@ class TransformerDecoder(nn.Module):
         self.num_layers = num_layers
         self.d_model = d_model
         self.norm = norm
+        self.norm_copy = copy.deepcopy(norm)
         self.return_intermediate = return_intermediate
         self.lite_refpoint_refine = lite_refpoint_refine
         self.bbox_reparam = bbox_reparam
@@ -464,7 +474,7 @@ class TransformerDecoder(nn.Module):
                 intermediate.append(self.norm(output))
 
         if self.norm is not None:
-            output = self.norm(output)
+            output = self.norm_copy(output)
             if self.return_intermediate:
                 intermediate.pop()
                 intermediate.append(output)
