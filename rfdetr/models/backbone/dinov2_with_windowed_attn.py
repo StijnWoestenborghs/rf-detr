@@ -254,9 +254,14 @@ class WindowedDinov2WithRegistersEmbeddings(nn.Module):
         patch_pos_embed = self.position_embeddings[:, 1:]
         dim = embeddings.shape[-1]
 
-        # Calculate new dimensions
-        height = height // self.config.patch_size
-        width = width // self.config.patch_size
+        # # Calculate new dimensions
+        # height = height // self.config.patch_size
+        # width = width // self.config.patch_size
+
+        # NOTE: hardcoded for NANO RF-DETR model 
+        # height, width, patch_size = 384, 384, 16
+        height = 24
+        width = 24
 
         # Reshape for interpolation
         sqrt_num_positions = int(num_positions**0.5)
