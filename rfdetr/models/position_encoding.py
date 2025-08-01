@@ -88,7 +88,7 @@ class PositionEmbeddingSine(nn.Module):
 
         # dim_t = torch.arange(self.num_pos_feats, dtype=torch.float32, device=mask.device)
         # unexplicit cast to x.device
-        dim_t = mask.new_zeros((self.num_pos_feats,), dtype=torch.float32)
+        dim_t = mask.new_zeros((1, self.num_pos_feats), dtype=torch.float32)
         dim_t.copy_(torch.arange(self.num_pos_feats, dtype=torch.float32))
         dim_t = self.temperature ** (2 * (dim_t // 2) / self.num_pos_feats)
 

@@ -58,7 +58,7 @@ def gen_sineembed_for_position(pos_tensor, dim=128):
     # sineembed_tensor = torch.zeros(n_query, bs, 256)
     scale = 2 * math.pi
     # unexplicit cast to pos_tensor.device
-    dim_t = pos_tensor.new_zeros((dim,), dtype=pos_tensor.dtype)
+    dim_t = pos_tensor.new_zeros((1, dim), dtype=pos_tensor.dtype)
     dim_t.copy_(torch.arange(dim, dtype=pos_tensor.dtype))
     dim_t = 10000 ** (2 * (dim_t // 2) / dim)
     x_embed = pos_tensor[:, :, 0] * scale
