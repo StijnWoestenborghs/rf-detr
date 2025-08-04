@@ -305,7 +305,8 @@ class Transformer(nn.Module):
 
                 topk = min(self.num_queries, num_positions)
                 # topk_proposals_gidx = torch.topk(enc_outputs_class_unselected_gidx.max(-1)[0], topk, dim=1)[1] # bs, nq
-                topk_proposals_gidx = torch.argsort(enc_outputs_class_unselected_gidx.max(-1)[0], dim=1, descending=True)[:, :topk]
+                # topk_proposals_gidx = torch.argsort(enc_outputs_class_unselected_gidx.max(-1)[0], dim=1, descending=True)[:, :topk]
+                topk_proposals_gidx = torch.argsort(torch.amax(enc_outputs_class_unselected_gidx, dim=-1), dim=1, descending=True)[:, :topk]
 
                 refpoint_embed_gidx_undetach = torch.gather(
                     enc_outputs_coord_unselected_gidx, 1, topk_proposals_gidx.unsqueeze(-1).repeat(1, 1, 4)) # unsigmoid
